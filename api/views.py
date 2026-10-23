@@ -34,42 +34,37 @@ class RegisterAPIView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        data = request.data
-        email = data.get('email')
-        
-        # Check if user already exists
-        if User.objects.filter(email=email).exists():
-            return Response({'error': 'Email already registered'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Generate OTP
-        otp = str(random.randint(100000, 999999))
-        
-        # Hash password before storing temporarily
-        hashed_password = make_password(data.get('password'))
-        temp_data = {
-            'username': data.get('username') or email.split('@')[0],
-            'email': email,
-            'password': hashed_password,
-            'name': data.get('name', ''),
-            'otp': otp
-        }
-        
-        # Store in cache for 3 minutes
-        cache.set(f'otp_{email}', temp_data, timeout=180)
-        
-        # Send Email
-        try:
-            send_mail(
-                'Verify your email - Pernambut Connect',
-                f'Your verification code is: {otp}. It expires in 3 minutes.',
-                settings.EMAIL_HOST_USER,
-                [email],
-                fail_silently=False,
-            )
-        except Exception as e:
-            return Response({'error': f'Failed to send email: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            refresh = RefreshToken.for_user(user)
+            return Response({
+                'user': UserSerializer(user).data,
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'message': 'Registration successful! Welcome to Pernambut Connect.'
+            }, status=status.HTTP_201_CREATED)
 
-        return Response({'message': 'OTP sent to email. Please verify to complete registration.'}, status=status.HTTP_200_OK)
+        errors = serializer.errors
+        error_msg = 'Registration failed'
+        if 'email' in errors:
+            val = errors['email']
+            error_msg = val[0] if isinstance(val, list) else str(val)
+        elif 'password' in errors:
+            val = errors['password']
+            error_msg = val[0] if isinstance(val, list) else str(val)
+        elif 'name' in errors:
+            val = errors['name']
+            error_msg = val[0] if isinstance(val, list) else str(val)
+        elif 'non_field_errors' in errors:
+            val = errors['non_field_errors']
+            error_msg = val[0] if isinstance(val, list) else str(val)
+        elif errors:
+            first_key = next(iter(errors))
+            val = errors[first_key]
+            error_msg = f"{first_key.capitalize()}: {val[0] if isinstance(val, list) else str(val)}"
+
+        return Response({'error': error_msg, 'details': errors}, status=status.HTTP_400_BAD_REQUEST)
 
 class VerifyOTPAPIView(APIView):
     permission_classes = [permissions.AllowAny]

@@ -18,22 +18,40 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'phone_number', 'name', 'area', 'is_staff', 'is_superuser', 'selected_mosque', 'mosque_details']
 
+import random
+
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, min_length=6)
+    username = serializers.CharField(required=False, allow_blank=True)
     
     class Meta:
         model = User
         fields = ['username', 'email', 'password', 'name']
         
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError('This email address is already registered.')
+        return value.lower()
+
     def create(self, validated_data):
+        email = validated_data['email']
+        username = validated_data.get('username')
+        if not username:
+            base_username = email.split('@')[0]
+            username = base_username
+            counter = 1
+            while User.objects.filter(username=username).exists():
+                username = f"{base_username}_{counter}"
+                counter += 1
+
         user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
+            username=username,
+            email=email,
             password=validated_data['password'],
             name=validated_data.get('name', '')
         )
         # Automatically grant admin access only to this specific email
-        if validated_data['email'] == 'zakkiadnan05@gmail.com':
+        if email.lower() == 'zakkiadnan05@gmail.com':
             user.is_staff = True
             user.is_superuser = True
             user.save()
